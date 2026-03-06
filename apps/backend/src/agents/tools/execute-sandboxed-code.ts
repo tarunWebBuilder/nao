@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 
 import { QueryResult } from '../../types/tools';
-import { createTool } from '../../utils/tools';
+import { createTool, shouldExcludeEntry } from '../../utils/tools';
 
 let boxliteModule: typeof import('@boxlite-ai/boxlite') | null = null;
 try {
@@ -96,9 +96,56 @@ async function getOrCreateSandbox(
 	return { id, box, reused: false };
 }
 
+const CONTEXT_DIR = `${WORKING_DIR}/context`;
+
+async function copyProjectToSandbox(box: CodeBox, projectFolder: string, tmpDir: string): Promise<void> {
+	const walkDir = (dir: string, relativeDir: string): void => {
+		const entries = fs.readdirSync(dir, { withFileTypes: true });
+		for (const entry of entries) {
+			if (shouldExcludeEntry(entry.name, relativeDir, projectFolder)) {
+				continue;
+			}
+			const fullPath = path.join(dir, entry.name);
+			const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+			if (entry.isDirectory()) {
+				walkDir(fullPath, relativePath);
+			} else if (entry.isFile()) {
+				const tmpPath = path.join(tmpDir, 'context', relativePath);
+				fs.mkdirSync(path.dirname(tmpPath), { recursive: true });
+				fs.copyFileSync(fullPath, tmpPath);
+			}
+		}
+	};
+
+	walkDir(projectFolder, '');
+
+	const contextTmpDir = path.join(tmpDir, 'context');
+	if (!fs.existsSync(contextTmpDir)) {
+		return;
+	}
+
+	const copyFiles = (dir: string, sandboxDir: string): Promise<void>[] => {
+		const promises: Promise<void>[] = [];
+		const entries = fs.readdirSync(dir, { withFileTypes: true });
+		for (const entry of entries) {
+			const fullPath = path.join(dir, entry.name);
+			const sandboxPath = `${sandboxDir}/${entry.name}`;
+			if (entry.isDirectory()) {
+				promises.push(...copyFiles(fullPath, sandboxPath));
+			} else {
+				promises.push(box.copyIn(fullPath, sandboxPath));
+			}
+		}
+		return promises;
+	};
+
+	await Promise.all(copyFiles(contextTmpDir, CONTEXT_DIR));
+}
+
 async function executeSandboxedCode(
 	{ sandbox_id, code, language, image, vm_size, packages, data_files }: schemas.Input,
 	queryResults: Map<string, QueryResult>,
+	projectFolder: string,
 ): Promise<schemas.Output> {
 	if (!boxliteModule) {
 		throw new Error('Sandbox execution is not available on this platform');
@@ -108,7 +155,7 @@ async function executeSandboxedCode(
 
 	const { id, box, reused } = await getOrCreateSandbox(sandbox_id, image ?? 'python:3.12-slim', vm_size ?? 'xxs');
 
-	let tmpDir: string | null = null;
+	let tmpDir: string | undefined;
 	const stderrParts: string[] = [];
 
 	if (sandbox_id && !reused) {
@@ -130,9 +177,13 @@ async function executeSandboxedCode(
 			}
 		}
 
-		if (data_files?.length) {
-			tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nao-sandbox-'));
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nao-sandbox-'));
 
+		if (!reused) {
+			await copyProjectToSandbox(box, projectFolder, tmpDir);
+		}
+
+		if (data_files?.length) {
 			for (const { query_id, filename } of data_files) {
 				const result = queryResults.get(query_id);
 				if (!result) {
@@ -198,7 +249,7 @@ export default boxliteModule
 			inputSchema: schemas.inputSchema,
 			outputSchema: schemas.outputSchema,
 			execute: async (input, context) => {
-				return executeSandboxedCode(input, context.queryResults);
+				return executeSandboxedCode(input, context.queryResults, context.projectFolder);
 			},
 		})
 	: null;
