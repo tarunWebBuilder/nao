@@ -16,7 +16,7 @@ import { CACHE_1H, CACHE_5M } from '../agents/providers';
 import { ProviderModelResult } from '../agents/providers';
 import { getTools } from '../agents/tools';
 import { createWebSearchTools } from '../agents/tools/web-search';
-import { getConnections, getUserRules } from '../agents/user-rules';
+import { getConnections, getTableColumnsContent, getUserRules } from '../agents/user-rules';
 import { SlackSystemPrompt, SystemPrompt } from '../components/ai';
 import { DBChat } from '../db/abstractSchema';
 import { renderToMarkdown } from '../lib/markdown';
@@ -296,8 +296,10 @@ class AgentManager {
 		isSlack?: boolean,
 	): Promise<ModelMessage[]> {
 		const uiMessagesWithStories = await this._syncStoryToolOutputs(uiMessages);
-		const uiMessagesWithSkills = this._addSkills(uiMessagesWithStories, mentions);
-		const uiMessagesWithCompaction = compactionService.useLastCompaction(uiMessagesWithSkills);
+		const uiMessagesWithStoryMode = this._addStoryMode(uiMessagesWithStories, mentions);
+		const uiMessagesWithSkills = this._addSkills(uiMessagesWithStoryMode, mentions);
+		const uiMessagesWithDbContext = this._addDatabaseContext(uiMessagesWithSkills, mentions);
+		const uiMessagesWithCompaction = compactionService.useLastCompaction(uiMessagesWithDbContext);
 
 		const memories = await memoryService.safeGetUserMemories(this.chat.userId, this.chat.projectId, this.chat.id);
 		const userRules = getUserRules();
@@ -445,31 +447,66 @@ class AgentManager {
 		this._abortController.abort();
 	}
 
-	private _addSkills(messages: UIMessage[], mentions?: Mention[]): UIMessage[] {
-		const skillMention = mentions?.find((m) => m.trigger === '/');
-		if (!skillMention) {
+	private _addStoryMode(messages: UIMessage[], mentions?: Mention[]): UIMessage[] {
+		if (!mentions?.some((m) => m.id === '__story__')) {
 			return messages;
 		}
 
-		const skillContent = skillService.getSkillContent(skillMention.id);
+		const STORY_INSTRUCTION =
+			'[Story mode: present your response as an interactive nao Story using the story tool, combining markdown and charts]';
+		return this._transformLastUserMessageText(messages, (text) => `${STORY_INSTRUCTION}\n\n${text}`);
+	}
+
+	private _addSkills(messages: UIMessage[], mentions?: Mention[]): UIMessage[] {
+		const skillMention = mentions?.find((m) => m.trigger === '/');
+		const skillContent = skillMention ? skillService.getSkillContent(skillMention.id) : undefined;
 		if (!skillContent) {
 			return messages;
 		}
+		return this._transformLastUserMessageText(messages, () => truncateMiddle(skillContent, 16_000));
+	}
 
+	private _addDatabaseContext(messages: UIMessage[], mentions?: Mention[]): UIMessage[] {
+		const dbMentions = mentions?.filter((m) => m.trigger === '@') ?? [];
+		if (dbMentions.length === 0) {
+			return messages;
+		}
+
+		const contextParts: string[] = [];
+		for (const mention of dbMentions) {
+			const content = getTableColumnsContent(this._toolContext.projectFolder, mention.id);
+			if (content) {
+				contextParts.push(`[Table: ${mention.id}]\n${content}`);
+			}
+		}
+
+		if (contextParts.length === 0) {
+			return messages;
+		}
+
+		const dbContext = contextParts.join('\n\n');
+		return this._transformLastUserMessageText(
+			messages,
+			(text) => `${text}\n\n---\nReferenced tables:\n${dbContext}`,
+		);
+	}
+
+	private _transformLastUserMessageText(messages: UIMessage[], transform: (text: string) => string): UIMessage[] {
 		const [lastUserMessage, lastUserMessageIndex] = findLastUserMessage(messages);
 		if (!lastUserMessage) {
 			return messages;
 		}
 
-		const updatedMessages = [...messages];
 		const textPartIndex = lastUserMessage.parts.findIndex((part) => part.type === 'text');
-		const newParts = [...lastUserMessage.parts];
-		newParts[textPartIndex] = {
-			type: 'text',
-			text: truncateMiddle(skillContent, 16_000),
-		};
-		updatedMessages[lastUserMessageIndex] = { ...lastUserMessage, parts: newParts };
+		if (textPartIndex === -1) {
+			return messages;
+		}
 
+		const textPart = lastUserMessage.parts[textPartIndex] as { type: 'text'; text: string };
+		const updatedMessages = [...messages];
+		const newParts = [...lastUserMessage.parts];
+		newParts[textPartIndex] = { type: 'text', text: transform(textPart.text) };
+		updatedMessages[lastUserMessageIndex] = { ...lastUserMessage, parts: newParts };
 		return updatedMessages;
 	}
 
