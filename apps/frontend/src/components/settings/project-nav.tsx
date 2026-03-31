@@ -20,22 +20,22 @@ const navItems: NavItem[] = [
 
 export function SettingsProjectNav() {
 	return (
-		<nav className='flex flex-col gap-1 sticky top-8 h-fit min-w-[140px]'>
+		<nav className='grid h-fit w-full min-w-0 grid-cols-2 gap-1 sm:grid-cols-3 md:sticky md:top-8 md:flex md:flex-col'>
 			{navItems.map((item) => {
 				return (
 					<Link
 						key={item.to}
 						to={item.to}
-						className={cn('text-left px-3 py-1 text-sm rounded-md transition-colors')}
+						className={cn('w-full rounded-md px-2 py-1 text-left text-[11px] leading-tight transition-colors sm:px-2.5 sm:py-1.5 sm:text-xs')}
 						activeOptions={{ exact: true }}
 						activeProps={{
-							className: cn('text-foreground font-medium bg-accent'),
+							className: cn('bg-accent font-medium text-foreground'),
 						}}
 						inactiveProps={{
-							className: cn('text-muted-foreground hover:text-foreground hover:bg-accent/50'),
+							className: cn('text-muted-foreground hover:bg-accent/50 hover:text-foreground'),
 						}}
 					>
-						{item.label}
+						<span className='block text-balance md:truncate'>{item.label}</span>
 					</Link>
 				);
 			})}

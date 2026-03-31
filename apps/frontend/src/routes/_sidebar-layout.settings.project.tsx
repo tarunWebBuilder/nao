@@ -15,11 +15,13 @@ function ProjectPage() {
 	return (
 		<SettingsPageWrapper>
 			<div className='flex flex-col gap-5'>
-				<h1 className='text-lg font-semibold text-foreground'>Project Settings</h1>
-				<div className='flex flex-row gap-6'>
-					<div className='flex flex-col items-start gap-2'>{project.data && <SettingsProjectNav />}</div>
+				<h1 className='text-base font-semibold text-foreground sm:text-lg'>Project Settings</h1>
+				<div className='flex flex-col gap-4 md:flex-row md:gap-5'>
+					<div className='flex w-full shrink-0 flex-col items-start gap-2 md:w-[20%] md:max-w-[132px] md:min-w-[72px]'>
+						{project.data && <SettingsProjectNav />}
+					</div>
 
-					<div className='flex flex-col gap-12 flex-1 min-w-0 mb-4'>
+					<div className='mb-4 flex min-w-0 flex-1 flex-col gap-6 sm:gap-8 md:gap-12'>
 						{project.data ? (
 							<Outlet />
 						) : (
