@@ -2,7 +2,7 @@ import { createMemoryState } from '@chat-adapter/state-memory';
 import { createWhatsAppAdapter } from '@chat-adapter/whatsapp';
 import { CITATION_TAG_REGEX } from '@nao/shared';
 import { InferUIMessageChunk, readUIMessageStream } from 'ai';
-import { Chat, Message, Thread } from 'chat';
+import { Attachment, Chat, Message, Thread } from 'chat';
 
 import { generateChartImage } from '../components/generate-chart';
 import * as chartImageQueries from '../queries/chart-image';
@@ -17,6 +17,7 @@ import { logger } from '../utils/logger';
 import { EXCLUDED_TOOLS } from '../utils/messaging-provider';
 import { agentService, ModelSelection } from './agent';
 import { posthog, PostHogEvent } from './posthog';
+import * as transcribeService from './transcribe.service';
 
 class WhatsappService {
 	private _bot: Chat | null = null;
@@ -205,7 +206,7 @@ class WhatsappService {
 	}
 
 	private async _saveOrUpdateUserMessage(ctx: ConversationContext): Promise<void> {
-		const text = ctx.userMessage.text;
+		const text = await this._resolveUserMessageText(ctx);
 		const threadId = ctx.thread.id;
 
 		const existingChat = await chatQueries.getChatByWhatsappThread(threadId);
@@ -227,6 +228,61 @@ class WhatsappService {
 			ctx.chatId = createdChat.id;
 			ctx.isNewChat = true;
 		}
+	}
+
+	private async _resolveUserMessageText(ctx: ConversationContext): Promise<string> {
+		const audioAttachment = this._getAudioAttachment(ctx.userMessage);
+		if (!audioAttachment) {
+			return ctx.userMessage.text;
+		}
+
+		const agentSettings = await projectQueries.getAgentSettings(this._projectId);
+		if (!agentSettings?.transcribe?.enabled) {
+			await ctx.thread.post(
+				'❌ Voice note transcription is not enabled for this project. Ask an admin to enable it in Settings > Models.',
+			);
+			throw new Error('Voice note transcription is disabled');
+		}
+
+		try {
+			const audio = await this._encodeAttachmentAsBase64(audioAttachment);
+			const transcript = (await transcribeService.transcribeAudio(this._projectId, audio)).trim();
+			if (!transcript) {
+				throw new Error('Transcription returned empty text');
+			}
+			return transcript;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'Unknown error';
+			await ctx.thread.post(`❌ I could not transcribe your voice note. ${message}`);
+			throw new Error(`Failed to transcribe audio message: ${message}`);
+		}
+	}
+
+	private _getAudioAttachment(message: Message): Attachment | undefined {
+		const placeholderText = message.text.trim();
+		if (placeholderText !== '[Voice message]' && placeholderText !== '[Audio message]') {
+			return undefined;
+		}
+
+		return message.attachments.find((attachment) => attachment.type === 'audio');
+	}
+
+	private async _encodeAttachmentAsBase64(attachment: Attachment): Promise<string> {
+		if (attachment.data instanceof Buffer) {
+			return attachment.data.toString('base64');
+		}
+
+		if (attachment.data instanceof Blob) {
+			const buffer = Buffer.from(await attachment.data.arrayBuffer());
+			return buffer.toString('base64');
+		}
+
+		if (attachment.fetchData) {
+			const buffer = await attachment.fetchData();
+			return buffer.toString('base64');
+		}
+
+		throw new Error('WhatsApp audio attachment data is unavailable');
 	}
 
 	private async _handleStreamAgent(chat: UIChat, ctx: ConversationContext): Promise<void> {
