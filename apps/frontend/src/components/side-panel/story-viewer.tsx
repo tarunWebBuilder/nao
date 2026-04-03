@@ -77,6 +77,9 @@ export function StoryViewer({ chatId, storyId }: StoryViewerProps) {
 
 	const handleOpenShare = useCallback(() => setIsShareDialogOpen(true), [setIsShareDialogOpen]);
 	const handleOpenLiveSettings = useCallback(() => setIsLiveSettingsOpen(true), []);
+	const handleExportPdf = useCallback(() => {
+		window.print();
+	}, []);
 
 	const renderStoryViewer = useCallback(
 		(nextStoryId: string) => <StoryViewer chatId={chatId} storyId={nextStoryId} />,
@@ -100,7 +103,7 @@ export function StoryViewer({ chatId, storyId }: StoryViewerProps) {
 	}
 
 	return (
-		<div className='flex h-full flex-col'>
+		<div className='story-export-root flex h-full flex-col'>
 			<StoryHeader
 				title={storyTitle}
 				storyId={resolvedStoryId}
@@ -116,6 +119,7 @@ export function StoryViewer({ chatId, storyId }: StoryViewerProps) {
 				onRestore={handleRestore}
 				onSave={handleSave}
 				onShare={handleOpenShare}
+				onExportPdf={handleExportPdf}
 				onEnlarge={handleEnlarge}
 				isShared={isShared}
 				isAgentRunning={isAgentRunning}

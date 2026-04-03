@@ -461,3 +461,68 @@ code {
 	color: var(--primary-foreground);
 	opacity: 0.9;
 }
+
+@media print {
+	html,
+	body {
+		height: auto;
+		overflow: visible;
+	}
+
+	body {
+		background: white !important;
+		color: black !important;
+	}
+
+	body * {
+		visibility: hidden !important;
+	}
+
+	.story-export-root {
+		visibility: visible !important;
+		position: static !important;
+		height: auto !important;
+		min-height: 0 !important;
+		overflow: visible !important;
+		background: white !important;
+		color: black !important;
+	}
+
+	.story-export-root * {
+		visibility: visible !important;
+		box-shadow: none !important;
+		text-shadow: none !important;
+	}
+
+	.story-export-root button,
+	.story-export-root [role='toolbar'],
+	.story-export-root [data-slot='tooltip'],
+	.story-export-root .no-print {
+		display: none !important;
+	}
+
+	.story-export-root .overflow-auto,
+	.story-export-root .overflow-hidden {
+		overflow: visible !important;
+	}
+
+	.story-export-root .min-h-0 {
+		min-height: auto !important;
+	}
+
+	.story-export-root header {
+		border-color: #e5e7eb !important;
+		background: white !important;
+	}
+
+	.story-export-root [data-streamdown='code-block'],
+	.story-export-root [data-streamdown='code-block-header'],
+	.story-export-root [data-streamdown='table-header'],
+	.story-export-root [data-streamdown='table-body'] {
+		background: white !important;
+	}
+
+	@page {
+		margin: 16mm;
+	}
+}

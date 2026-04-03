@@ -6,6 +6,7 @@ import {
 	Code,
 	Eye,
 	Globe,
+	Download,
 	Loader2,
 	Maximize2,
 	Pencil,
@@ -43,6 +44,7 @@ export interface StoryHeaderProps {
 	onRestore: () => void;
 	onSave: () => void;
 	onShare: () => void;
+	onExportPdf: () => void;
 	onEnlarge: () => void;
 	isShared: boolean;
 	isAgentRunning: boolean;
@@ -69,6 +71,7 @@ export const StoryHeader = memo(function StoryHeader({
 	onRestore,
 	onSave,
 	onShare,
+	onExportPdf,
 	onEnlarge,
 	isShared,
 	isAgentRunning,
@@ -208,6 +211,9 @@ export const StoryHeader = memo(function StoryHeader({
 				aria-label='Share Story'
 			>
 				{isShared ? <Globe className='size-3 text-emerald-600' /> : <Share className='size-3' />}
+			</Button>
+			<Button variant='ghost-muted' size='icon-xs' onClick={onExportPdf} aria-label='Export story as PDF'>
+				<Download className='size-3' />
 			</Button>
 		</>
 	);

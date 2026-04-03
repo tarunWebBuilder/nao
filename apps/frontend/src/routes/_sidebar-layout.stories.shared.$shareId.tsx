@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { Activity, Loader2, MessageSquare, RefreshCw } from 'lucide-react';
+import { Activity, Download, Loader2, MessageSquare, RefreshCw } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 
 import type { ParsedChartBlock, ParsedTableBlock } from '@/lib/story-segments';
@@ -45,7 +45,7 @@ function SharedStoryPage() {
 	const cachedAt = story.cachedAt ? new Date(story.cachedAt as unknown as string) : null;
 
 	return (
-		<div className='flex flex-col flex-1 h-full overflow-hidden bg-panel min-w-0'>
+		<div className='story-export-root flex flex-col flex-1 h-full overflow-hidden bg-panel min-w-0'>
 			<header className='flex items-center gap-3 border-b px-4 py-3 md:px-6 md:py-4 shrink-0 bg-background'>
 				<h1 className='text-base font-medium truncate'>{story.title}</h1>
 				<span className='text-sm text-muted-foreground shrink-0'>by {story.authorName}</span>
@@ -96,6 +96,10 @@ function SharedStoryPage() {
 						</Link>
 					</Button>
 				)}
+				<Button variant='ghost-muted' size='sm' className='gap-1.5 shrink-0' onClick={() => window.print()}>
+					<Download className='size-3.5' />
+					<span>Export PDF</span>
+				</Button>
 			</header>
 
 			<SharedStoryContent
