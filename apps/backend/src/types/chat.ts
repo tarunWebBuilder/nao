@@ -1,3 +1,4 @@
+import { ALLOWED_IMAGE_MEDIA_TYPES } from '@nao/shared/types';
 import {
 	DynamicToolUIPart,
 	FinishReason,
@@ -10,7 +11,7 @@ import z from 'zod/v4';
 
 import { getTools, tools } from '../agents/tools';
 import { MessageFeedback } from '../db/abstractSchema';
-import { llmProviderSchema } from './llm';
+import { llmSelectedModelSchema } from './llm';
 
 export interface ForkMetadata {
 	type: 'chat' | 'chat_selection' | 'story' | 'story_selection';
@@ -127,13 +128,10 @@ export const MentionSchema = z.object({
 	label: z.string(),
 });
 
-const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
-
 export const AgentRequestImageSchema = z.object({
-	mediaType: z.enum(ALLOWED_IMAGE_TYPES),
+	mediaType: z.enum(ALLOWED_IMAGE_MEDIA_TYPES),
 	data: z.string().min(1),
 });
-export type AgentRequestImage = z.infer<typeof AgentRequestImageSchema>;
 
 export type AgentRequestUserMessage = z.infer<typeof AgentRequestUserMessageSchema>;
 export const AgentRequestUserMessageSchema = z.object({
@@ -141,17 +139,12 @@ export const AgentRequestUserMessageSchema = z.object({
 	images: z.array(AgentRequestImageSchema).optional(),
 });
 
-const ModelSelectionSchema = z.object({
-	provider: llmProviderSchema,
-	modelId: z.string(),
-});
-
 export type AgentRequest = z.infer<typeof AgentRequestSchema>;
 export const AgentRequestSchema = z.object({
 	message: AgentRequestUserMessageSchema,
 	chatId: z.string().optional(),
 	messageToEditId: z.string().optional(),
-	model: ModelSelectionSchema.optional(),
+	model: llmSelectedModelSchema.optional(),
 	mentions: z.array(MentionSchema).optional(),
 	timezone: z.string().optional(),
 });

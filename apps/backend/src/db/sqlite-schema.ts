@@ -1,11 +1,12 @@
-import { USER_ROLES } from '@nao/shared/types';
+import type { LlmProvider } from '@nao/shared/types';
+import { SHARE_VISIBILITY, USER_ROLES } from '@nao/shared/types';
 import { type ProviderMetadata } from 'ai';
 import { sql } from 'drizzle-orm';
 import { check, index, integer, primaryKey, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core';
 
 import { AgentSettings } from '../types/agent-settings';
 import { ForkMetadata, StopReason, ToolState, UIMessagePartType } from '../types/chat';
-import { LLM_INFERENCE_TYPES, LlmProvider } from '../types/llm';
+import { LLM_INFERENCE_TYPES } from '../types/llm';
 import { LOG_LEVELS, LOG_SOURCES } from '../types/log';
 import { MEMORY_CATEGORIES } from '../types/memory';
 import { SlackSettings, TeamsSettings, TelegramSettings, WhatsappSettings } from '../types/messaging-provider';
@@ -384,8 +385,6 @@ export const projectLlmConfig = sqliteTable(
 		unique('project_llm_config_project_provider').on(t.projectId, t.provider),
 	],
 );
-
-export const SHARE_VISIBILITY = ['project', 'specific'] as const;
 
 export const sharedChat = sqliteTable(
 	'shared_chat',
