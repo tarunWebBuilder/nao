@@ -1,5 +1,6 @@
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { type AnthropicProviderOptions, createAnthropic } from '@ai-sdk/anthropic';
+import { createAzure } from '@ai-sdk/azure';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createVertex } from '@ai-sdk/google-vertex';
 import { createVertexAnthropic } from '@ai-sdk/google-vertex/anthropic';
@@ -115,6 +116,24 @@ export const LLM_PROVIDERS: LlmProvidersType = {
 			}
 			return createVertex(config)(modelId);
 		},
+	},
+	azure: {
+		...PROVIDER_META.azure,
+		create: (settings, modelId) => {
+			const creds = settings.credentials;
+			const resourceName = creds?.resourceName || process.env.AZURE_RESOURCE_NAME;
+			const apiVersion = creds?.apiVersion || process.env.AZURE_API_VERSION;
+			const useDeploymentBasedUrls =
+				(creds?.useDeploymentBasedUrls || process.env.AZURE_USE_DEPLOYMENT_BASED_URLS) === 'true';
+
+			return createAzure({
+				apiKey: settings.apiKey,
+				...(settings.baseURL ? { baseURL: settings.baseURL } : resourceName ? { resourceName } : {}),
+				...(apiVersion && { apiVersion }),
+				...(useDeploymentBasedUrls && { useDeploymentBasedUrls }),
+			})(modelId);
+		},
+		defaultOptions: { store: false },
 	},
 };
 
