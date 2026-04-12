@@ -19,6 +19,7 @@ import { teamsRoutes } from './routes/teams';
 import { telegramRoutes } from './routes/telegram';
 import { testRoutes } from './routes/test';
 import { whatsappRoutes } from './routes/whatsapp';
+import { emailService } from './services/email';
 import { posthog, PostHogEvent } from './services/posthog';
 import { TrpcRouter, trpcRouter } from './trpc/router';
 import { createContext } from './trpc/trpc';
@@ -204,6 +205,7 @@ if (staticRoot) {
 
 export const startServer = async (opts: { port: number; host: string }) => {
 	await ensureOrganizationSetup();
+	await emailService.reloadSmtpConfig();
 	startLogCleanup();
 
 	const address = await app.listen({ host: opts.host, port: opts.port });

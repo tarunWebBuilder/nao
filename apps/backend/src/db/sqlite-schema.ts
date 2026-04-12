@@ -109,6 +109,12 @@ export const organization = sqliteTable('organization', {
 	googleClientId: text('google_client_id'),
 	googleClientSecret: text('google_client_secret'),
 	googleAuthDomains: text('google_auth_domains'), // comma-separated list
+	// SMTP config
+	smtpHost: text('smtp_host'),
+	smtpPort: text('smtp_port'),
+	smtpMailFrom: text('smtp_mail_from'),
+	smtpPassword: text('smtp_password'),
+	smtpSsl: integer('smtp_ssl', { mode: 'boolean' }),
 
 	createdAt: integer('created_at', { mode: 'timestamp_ms' })
 		.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
