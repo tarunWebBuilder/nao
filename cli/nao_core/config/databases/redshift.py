@@ -73,6 +73,7 @@ class RedshiftDatabaseContext(DatabaseContext):
             "date": "date",
             "timestamp without time zone": "timestamp",
             "timestamp with time zone": "timestamp",
+            "super": "super",
         }
 
         ibis_type = type_map.get(data_type, "string")
@@ -141,6 +142,9 @@ class RedshiftDatabaseContext(DatabaseContext):
 
     def _cast_float(self, expr: str) -> str:
         return f"{expr}::float"
+
+    def _cast_complex_to_string(self, col_sql: str) -> str:
+        return f"JSON_SERIALIZE({col_sql})"
 
 
 class RedshiftSSHTunnelConfig(BaseModel):
@@ -292,6 +296,16 @@ class RedshiftConfig(DatabaseConfig):
     def create_context(self, conn: BaseBackend, schema: str, table_name: str) -> RedshiftDatabaseContext:
         """Create a Redshift-specific database context that avoids pg_enum queries."""
         return RedshiftDatabaseContext(conn, schema, table_name)
+
+    def get_query_history_sql(self, days: int) -> str | None:
+        return (
+            f"SELECT querytxt AS query_text "
+            f"FROM stl_query "
+            f"WHERE starttime >= DATEADD(day, -{days}, GETDATE()) "
+            f"AND aborted = 0 "
+            f"ORDER BY starttime DESC "
+            f"LIMIT 10000"
+        )
 
     def check_connection(self) -> tuple[bool, str]:
         """Test connectivity to Redshift."""

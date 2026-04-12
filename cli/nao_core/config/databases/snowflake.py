@@ -65,6 +65,9 @@ class SnowflakeDatabaseContext(DatabaseContext):
     def _cast_float(self, expr: str) -> str:
         return f"{expr}::FLOAT"
 
+    def _cast_complex_to_string(self, col_sql: str) -> str:
+        return f"TO_JSON({col_sql})::VARCHAR"
+
     def _partition_filter(self) -> str:
         cols = self.partition_columns()
         if cols:
@@ -253,6 +256,17 @@ class SnowflakeConfig(DatabaseConfig):
 
     def create_context(self, conn: BaseBackend, schema: str, table_name: str) -> SnowflakeDatabaseContext:
         return SnowflakeDatabaseContext(conn, schema, table_name)
+
+    def get_query_history_sql(self, days: int) -> str | None:
+        return (
+            f"SELECT query_text AS query_text "
+            f"FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY "
+            f"WHERE start_time >= DATEADD(day, -{days}, CURRENT_TIMESTAMP()) "
+            f"AND execution_status = 'SUCCESS' "
+            f"AND query_type = 'SELECT' "
+            f"ORDER BY start_time DESC "
+            f"LIMIT 10000"
+        )
 
     def check_connection(self) -> tuple[bool, str]:
         """Test connectivity to Snowflake."""

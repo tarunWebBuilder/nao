@@ -25,7 +25,7 @@ export const useSidePanel = ({
 	const resizeHandleRef = useRef<HTMLDivElement>(null);
 
 	const [content, setContent] = useState<React.ReactNode>(null);
-	const [currentStoryId, setCurrentStoryId] = useState<string | null>(null);
+	const [currentStorySlug, setCurrentStorySlug] = useState<string | null>(null);
 
 	const [isVisible, setIsVisible] = useState(false);
 	const [isAnimating, setIsAnimating] = useState(false);
@@ -35,7 +35,7 @@ export const useSidePanel = ({
 	const isMobile = useIsMobile();
 	const { collapse: collapseSidebar, expand: expandSidebar, isCollapsed: isSidebarCollapsed } = useSidebar();
 
-	const chatId = useParams({ strict: false, select: (params) => params.chatId });
+	const routeKey = useParams({ strict: false, select: (params) => params.chatId ?? params.shareId });
 
 	const animateSidePanel = useCallback(
 		({ onComplete, ...style }: { onComplete?: () => void } & React.CSSProperties) => {
@@ -110,10 +110,10 @@ export const useSidePanel = ({
 	}, [isVisible, isMobile, animateSidePanel, containerRef, sidePanelRef, defaultWidthRatio, shouldCollapseSidebar]);
 
 	const open = useCallback(
-		(newContent: React.ReactNode, storyId?: string) => {
+		(newContent: React.ReactNode, storySlug?: string) => {
 			setIsVisible(true);
 			setContent(newContent);
-			setCurrentStoryId(storyId ?? null);
+			setCurrentStorySlug(storySlug ?? null);
 			if (!isMobile && shouldCollapseSidebar) {
 				didCollapseSidebarRef.current = !isSidebarCollapsed;
 				collapseSidebar({ persist: false });
@@ -147,15 +147,15 @@ export const useSidePanel = ({
 		expandSidebarIfWasCollapsed();
 		setIsVisible(false);
 		setContent(null);
-		setCurrentStoryId(null);
-	}, [chatId, expandSidebarIfWasCollapsed]);
+		setCurrentStorySlug(null);
+	}, [routeKey, expandSidebarIfWasCollapsed]);
 
 	return {
 		resizeHandleRef,
 		isVisible,
 		isAnimating,
 		content,
-		currentStoryId,
+		currentStorySlug,
 		open,
 		close,
 	};

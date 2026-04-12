@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react';
 import { ArrowUpRight } from 'lucide-react';
-import { useParams } from '@tanstack/react-router';
 import { TextShimmer } from '../ui/text-shimmer';
 import { Skeleton } from '../ui/skeleton';
 import { Button } from '../ui/button';
@@ -8,34 +7,54 @@ import StoryIcon from '../ui/story-icon';
 import type { ToolCallComponentProps } from '.';
 import { StoryViewer } from '@/components/side-panel/story-viewer';
 import { useSidePanel } from '@/contexts/side-panel';
+import { useChatId } from '@/hooks/use-chat-id';
 
 export const StoryToolCall = ({ toolPart }: ToolCallComponentProps<'story'>) => {
-	const { open: openSidePanel, isVisible, currentStoryId, chatId: contextChatId } = useSidePanel();
-	const { chatId: routeChatId } = useParams({ strict: false });
-	const chatId = routeChatId ?? contextChatId;
+	const { open: openSidePanel, isVisible, currentStorySlug, chatId: sidePanelChatId } = useSidePanel();
+	const contextOrUrlChatId = useChatId();
+	const chatId = contextOrUrlChatId ?? sidePanelChatId;
 	const input = toolPart.input;
 	const isStreaming = toolPart.state === 'input-streaming';
 	const output = toolPart.output;
 	const hasAutoOpenedRef = useRef(false);
 
-	const finalStoryId = output?.id ?? input?.id;
-	const canOpen = Boolean(chatId && finalStoryId);
+	const finalStorySlug = output?.id ?? input?.id;
+	const canOpen = Boolean(chatId && finalStorySlug);
 	const isCreateAction = input?.action === 'create';
 
+	const isInInteractiveContext = Boolean(contextOrUrlChatId);
+
 	useEffect(() => {
-		if (hasAutoOpenedRef.current || !isCreateAction || !isStreaming || !canOpen || !chatId || !finalStoryId) {
+		if (hasAutoOpenedRef.current || !isCreateAction || !isStreaming || !canOpen || !chatId || !finalStorySlug) {
 			return;
 		}
 
 		// Do not re-open if the same story is already visible.
-		if (isVisible && currentStoryId === finalStoryId) {
+		if (isVisible && currentStorySlug === finalStorySlug) {
 			hasAutoOpenedRef.current = true;
 			return;
 		}
 
-		openSidePanel(<StoryViewer chatId={chatId} storyId={finalStoryId} />, finalStoryId);
+		openSidePanel(
+			<StoryViewer
+				chatId={chatId}
+				storySlug={finalStorySlug}
+				isReadonlyMode={isInInteractiveContext ? false : undefined}
+			/>,
+			finalStorySlug,
+		);
 		hasAutoOpenedRef.current = true;
-	}, [isCreateAction, isStreaming, canOpen, chatId, finalStoryId, isVisible, currentStoryId, openSidePanel]);
+	}, [
+		isCreateAction,
+		isStreaming,
+		canOpen,
+		chatId,
+		finalStorySlug,
+		isVisible,
+		currentStorySlug,
+		openSidePanel,
+		isInInteractiveContext,
+	]);
 
 	if (!input) {
 		const partialAction = (toolPart as { input?: { action?: string } }).input?.action;
@@ -70,10 +89,17 @@ export const StoryToolCall = ({ toolPart }: ToolCallComponentProps<'story'>) => 
 		: `${actionLabel}${output?.version ? ` · v${output.version}` : ''}`;
 
 	const handleOpen = () => {
-		if (!canOpen || !chatId || !finalStoryId) {
+		if (!canOpen || !chatId || !finalStorySlug) {
 			return;
 		}
-		openSidePanel(<StoryViewer chatId={chatId} storyId={finalStoryId} />, finalStoryId);
+		openSidePanel(
+			<StoryViewer
+				chatId={chatId}
+				storySlug={finalStorySlug}
+				isReadonlyMode={isInInteractiveContext ? false : undefined}
+			/>,
+			finalStorySlug,
+		);
 	};
 
 	return (

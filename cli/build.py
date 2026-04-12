@@ -128,6 +128,10 @@ def _ensure_platform_deps(project_root: Path) -> None:
     other platforms are absent. Packages are installed in a single `npm install`
     call. Failures are non-fatal because some packages (e.g. boxlite) don't
     publish binaries for every platform.
+
+    When ANY dep is missing we must reinstall ALL of them in a single call,
+    because `npm install --no-save` reconciles the tree and removes unlocked
+    packages that are not in the install list.
     """
     all_deps = _find_platform_deps(project_root)
     nm = project_root / "node_modules"
@@ -138,9 +142,12 @@ def _ensure_platform_deps(project_root: Path) -> None:
     print("\n📦 Installing platform-specific dependencies...")
     for dep in missing:
         print(f"   + {dep}")
+    already_present = [dep for dep in all_deps if dep not in missing]
+    for dep in already_present:
+        print(f"   ✓ {dep} (re-including to survive npm tree reconciliation)")
 
     result = subprocess.run(
-        ["npm", "install", "--no-save", *missing],
+        ["npm", "install", "--no-save", *all_deps],
         cwd=project_root,
         shell=sys.platform == "win32",
     )

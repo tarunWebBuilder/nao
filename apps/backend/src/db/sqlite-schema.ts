@@ -1,11 +1,12 @@
-import { USER_ROLES } from '@nao/shared/types';
+import type { LlmProvider } from '@nao/shared/types';
+import { SHARE_VISIBILITY, USER_ROLES } from '@nao/shared/types';
 import { type ProviderMetadata } from 'ai';
 import { sql } from 'drizzle-orm';
 import { check, index, integer, primaryKey, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core';
 
 import { AgentSettings } from '../types/agent-settings';
-import { StopReason, ToolState, UIMessagePartType } from '../types/chat';
-import { LLM_INFERENCE_TYPES, LlmProvider } from '../types/llm';
+import { ForkMetadata, StopReason, ToolState, UIMessagePartType } from '../types/chat';
+import { LLM_INFERENCE_TYPES } from '../types/llm';
 import { LOG_LEVELS, LOG_SOURCES } from '../types/log';
 import { MEMORY_CATEGORIES } from '../types/memory';
 import { SlackSettings, TeamsSettings, TelegramSettings, WhatsappSettings } from '../types/messaging-provider';
@@ -168,6 +169,30 @@ export const project = sqliteTable(
 	],
 );
 
+export const projectWhatsappLink = sqliteTable(
+	'project_whatsapp_link',
+	{
+		projectId: text('project_id')
+			.notNull()
+			.references(() => project.id, { onDelete: 'cascade' }),
+		whatsappUserId: text('whatsapp_user_id').notNull(),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		createdAt: integer('created_at', { mode: 'timestamp_ms' })
+			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+			.notNull(),
+		updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+			.$onUpdate(() => new Date())
+			.notNull(),
+	},
+	(t) => [
+		primaryKey({ columns: [t.projectId, t.whatsappUserId] }),
+		index('project_whatsapp_link_userId_idx').on(t.userId),
+	],
+);
+
 export const chat = sqliteTable(
 	'chat',
 	{
@@ -187,6 +212,7 @@ export const chat = sqliteTable(
 		teamsThreadId: text('teams_thread_id'),
 		telegramThreadId: text('telegram_thread_id'),
 		whatsappThreadId: text('whatsapp_thread_id'),
+		forkMetadata: text('fork_metadata', { mode: 'json' }).$type<ForkMetadata>(),
 		createdAt: integer('created_at', { mode: 'timestamp_ms' })
 			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
 			.notNull(),
@@ -221,6 +247,7 @@ export const chatMessage = sqliteTable(
 		llmModelId: text('llm_model_id'),
 		supersededAt: integer('superseded_at', { mode: 'timestamp_ms' }),
 		source: text('source', { enum: ['slack', 'teams', 'telegram', 'whatsapp', 'web'] }),
+		isForked: integer('isForked', { mode: 'boolean' }),
 		createdAt: integer('created_at', { mode: 'timestamp_ms' })
 			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
 			.notNull(),
@@ -358,8 +385,6 @@ export const projectLlmConfig = sqliteTable(
 		unique('project_llm_config_project_provider').on(t.projectId, t.provider),
 	],
 );
-
-export const SHARE_VISIBILITY = ['project', 'specific'] as const;
 
 export const sharedChat = sqliteTable(
 	'shared_chat',

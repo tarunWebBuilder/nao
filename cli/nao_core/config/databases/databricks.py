@@ -76,6 +76,12 @@ class DatabricksDatabaseContext(DatabaseContext):
             return f"`{cols[0]}` >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)"
         return ""
 
+    def _array_unnest_join(self, table_sql: str, col_sql: str, alias: str) -> str:
+        return f"{table_sql} LATERAL VIEW EXPLODE({col_sql}) _tmp AS {alias}"
+
+    def _cast_complex_to_string(self, col_sql: str) -> str:
+        return f"CAST({col_sql} AS STRING)"
+
 
 def _get_databricks_partition_columns(conn: BaseBackend, schema: str, table: str) -> list[str]:
     query = f"""
@@ -164,6 +170,17 @@ class DatabricksConfig(DatabaseConfig):
 
     def create_context(self, conn: BaseBackend, schema: str, table_name: str) -> DatabricksDatabaseContext:
         return DatabricksDatabaseContext(conn, schema, table_name)
+
+    def get_query_history_sql(self, days: int) -> str | None:
+        return (
+            f"SELECT statement AS query_text "
+            f"FROM system.query.history "
+            f"WHERE start_time >= DATEADD(day, -{days}, CURRENT_TIMESTAMP()) "
+            f"AND status = 'FINISHED' "
+            f"AND statement_type = 'SELECT' "
+            f"ORDER BY start_time DESC "
+            f"LIMIT 10000"
+        )
 
     def check_connection(self) -> tuple[bool, str]:
         """Test connectivity to Databricks."""

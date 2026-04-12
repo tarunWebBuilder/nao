@@ -1,4 +1,5 @@
-import { USER_ROLES } from '@nao/shared/types';
+import type { LlmProvider } from '@nao/shared/types';
+import { SHARE_VISIBILITY, USER_ROLES } from '@nao/shared/types';
 import { type ProviderMetadata } from 'ai';
 import { sql } from 'drizzle-orm';
 import {
@@ -15,8 +16,8 @@ import {
 } from 'drizzle-orm/pg-core';
 
 import { AgentSettings } from '../types/agent-settings';
-import { StopReason, ToolState, UIMessagePartType } from '../types/chat';
-import { LLM_INFERENCE_TYPES, LlmProvider } from '../types/llm';
+import { ForkMetadata, StopReason, ToolState, UIMessagePartType } from '../types/chat';
+import { LLM_INFERENCE_TYPES } from '../types/llm';
 import { LOG_LEVELS, LOG_SOURCES } from '../types/log';
 import { MEMORY_CATEGORIES } from '../types/memory';
 import { SlackSettings, TeamsSettings, TelegramSettings, WhatsappSettings } from '../types/messaging-provider';
@@ -160,6 +161,28 @@ export const project = pgTable(
 	],
 );
 
+export const projectWhatsappLink = pgTable(
+	'project_whatsapp_link',
+	{
+		projectId: text('project_id')
+			.notNull()
+			.references(() => project.id, { onDelete: 'cascade' }),
+		whatsappUserId: text('whatsapp_user_id').notNull(),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		createdAt: timestamp('created_at').defaultNow().notNull(),
+		updatedAt: timestamp('updated_at')
+			.defaultNow()
+			.$onUpdate(() => new Date())
+			.notNull(),
+	},
+	(t) => [
+		primaryKey({ columns: [t.projectId, t.whatsappUserId] }),
+		index('project_whatsapp_link_userId_idx').on(t.userId),
+	],
+);
+
 export const chat = pgTable(
 	'chat',
 	{
@@ -179,6 +202,7 @@ export const chat = pgTable(
 		teamsThreadId: text('teams_thread_id'),
 		telegramThreadId: text('telegram_thread_id'),
 		whatsappThreadId: text('whatsapp_thread_id'),
+		forkMetadata: jsonb('fork_metadata').$type<ForkMetadata>(),
 		createdAt: timestamp('created_at').defaultNow().notNull(),
 		updatedAt: timestamp('updated_at')
 			.defaultNow()
@@ -211,6 +235,7 @@ export const chatMessage = pgTable(
 		llmModelId: text('llm_model_id'),
 		supersededAt: timestamp('superseded_at'),
 		source: text('source', { enum: ['slack', 'teams', 'telegram', 'whatsapp', 'web'] }),
+		isForked: boolean('isForked'),
 		createdAt: timestamp('created_at').defaultNow().notNull(),
 
 		// Token usage columns
@@ -343,8 +368,6 @@ export const projectLlmConfig = pgTable(
 		unique('project_llm_config_project_provider').on(t.projectId, t.provider),
 	],
 );
-
-export const SHARE_VISIBILITY = ['project', 'specific'] as const;
 
 export const sharedChat = pgTable(
 	'shared_chat',

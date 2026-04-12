@@ -1,4 +1,5 @@
 import { story } from '@nao/shared/tools';
+import type { LlmProvider, LlmSelectedModel } from '@nao/shared/types';
 import {
 	convertToModelMessages,
 	createUIMessageStream,
@@ -20,7 +21,7 @@ import { CACHE_1H, CACHE_5M, LLM_PROVIDERS, ProviderModelResult } from '../agent
 import { getTools } from '../agents/tools';
 import { createWebSearchTools } from '../agents/tools/web-search';
 import { getConnections, getTableColumnsContent, getUserRules } from '../agents/user-rules';
-import { MessagingProviderSystemPrompt, SystemPrompt } from '../components/ai';
+import { ChatForkContextPrompt, MessagingProviderSystemPrompt, SystemPrompt } from '../components/ai';
 import { DBChat } from '../db/abstractSchema';
 import { renderToMarkdown } from '../lib/markdown';
 import * as chatQueries from '../queries/chat.queries';
@@ -29,26 +30,25 @@ import * as projectQueries from '../queries/project.queries';
 import * as llmConfigQueries from '../queries/project-llm-config.queries';
 import * as storyQueries from '../queries/story.queries';
 import { AgentSettings } from '../types/agent-settings';
-import { AgentTools, Mention, MessageCustomDataParts, TokenCost, TokenUsage, UIMessage } from '../types/chat';
-import { LlmProvider } from '../types/llm';
+import {
+	AgentTools,
+	ForkMetadata,
+	Mention,
+	MessageCustomDataParts,
+	TokenCost,
+	TokenUsage,
+	UIMessage,
+} from '../types/chat';
 import { Provider } from '../types/messaging-provider';
 import { ToolContext } from '../types/tools';
 import { convertToCost, convertToTokenUsage, findLastUserMessage, getLastUserMessageText } from '../utils/ai';
 import { HandlerError } from '../utils/error';
-import {
-	getDefaultModelId,
-	getEnvModelSelections,
-	ModelSelection,
-	resolveProviderModel,
-	resolveProviderSettings,
-} from '../utils/llm';
+import { getDefaultModelId, getEnvModelSelections, resolveProviderModel, resolveProviderSettings } from '../utils/llm';
 import { logger } from '../utils/logger';
 import { truncateMiddle } from '../utils/utils';
 import { compactionService } from './compaction';
 import { memoryService } from './memory';
 import { skillService } from './skill';
-
-export type { ModelSelection };
 
 export interface AgentRunResult {
 	text: string;
@@ -66,23 +66,25 @@ export interface AgentRunResult {
 	}>;
 }
 
-export type AgentChat = Pick<DBChat, 'id' | 'projectId' | 'userId'>;
+export type AgentChat = Pick<DBChat, 'id' | 'projectId' | 'userId'> & {
+	forkMetadata?: ForkMetadata | null;
+};
 
 export class AgentService {
 	private _agents = new Map<string, AgentManager>();
 
-	async create(chat: AgentChat, modelSelection?: ModelSelection): Promise<AgentManager> {
+	async create(chat: AgentChat, modelSelection?: LlmSelectedModel): Promise<AgentManager> {
 		this._disposeAgent(chat.id);
-		const resolvedModelSelection = await this._getResolvedModelSelection(chat.projectId, modelSelection);
-		const modelConfig = await this._getModelConfig(chat.projectId, resolvedModelSelection);
+		const resolvedLlmSelectedModel = await this._getResolvedLlmSelectedModel(chat.projectId, modelSelection);
+		const modelConfig = await this._getModelConfig(chat.projectId, resolvedLlmSelectedModel);
 		const agentSettings = await projectQueries.getAgentSettings(chat.projectId);
 		const toolContext = await this._getToolContext(chat.projectId, chat.id, agentSettings);
-		const webTools = await this._resolveWebTools(chat.projectId, resolvedModelSelection.provider, agentSettings);
+		const webTools = await this._resolveWebTools(chat.projectId, resolvedLlmSelectedModel.provider, agentSettings);
 		const agentTools = getTools(agentSettings, webTools ?? undefined);
 		const agent = new AgentManager(
 			chat,
 			modelConfig,
-			resolvedModelSelection,
+			resolvedLlmSelectedModel,
 			() => this._agents.delete(chat.id),
 			new AbortController(),
 			agentTools,
@@ -92,10 +94,10 @@ export class AgentService {
 		return agent;
 	}
 
-	protected async _getResolvedModelSelection(
+	protected async _getResolvedLlmSelectedModel(
 		projectId: string,
-		modelSelection?: ModelSelection,
-	): Promise<ModelSelection> {
+		modelSelection?: LlmSelectedModel,
+	): Promise<LlmSelectedModel> {
 		if (modelSelection) {
 			return modelSelection;
 		}
@@ -164,7 +166,7 @@ export class AgentService {
 		return createWebSearchTools(provider, settings);
 	}
 
-	protected async _getModelConfig(projectId: string, modelSelection: ModelSelection): Promise<ProviderModelResult> {
+	protected async _getModelConfig(projectId: string, modelSelection: LlmSelectedModel): Promise<ProviderModelResult> {
 		const result = await resolveProviderModel(projectId, modelSelection.provider, modelSelection.modelId);
 		if (!result) {
 			throw new HandlerError('BAD_REQUEST', 'The selected model could not be resolved.');
@@ -182,7 +184,7 @@ class AgentManager {
 	constructor(
 		readonly chat: AgentChat,
 		private readonly _modelConfig: ProviderModelResult,
-		private readonly _modelSelection: ModelSelection,
+		private readonly _modelSelection: LlmSelectedModel,
 		private readonly _onDispose: () => void,
 		private readonly _abortController: AbortController,
 		private readonly _agentTools: AgentTools,
@@ -231,18 +233,11 @@ class AgentManager {
 			mentions?: Mention[];
 			provider?: Provider;
 			timezone?: string;
+			chatUrl?: string;
 		} = {},
 	): ReadableStream<InferUIMessageChunk<UIMessage>> {
 		let error: unknown = undefined;
 		let result: StreamTextResult<AgentTools, never> | undefined;
-
-		const debugWriteMessages = async (uiMessages: UIMessage[]) => {
-			const { writeFile } = await import('node:fs/promises');
-			const path = new URL('debug-ui-messages.json', `file://${process.cwd()}/`).pathname;
-			await writeFile(path, JSON.stringify(uiMessages, null, 2));
-			console.log(`[debug] wrote ${uiMessages.length} uiMessages to ${path}`);
-		};
-		debugWriteMessages(uiMessages);
 
 		return createUIMessageStream<UIMessage>({
 			generateId: () => crypto.randomUUID(),
@@ -269,6 +264,7 @@ class AgentManager {
 					opts.mentions,
 					opts.provider,
 					opts.timezone,
+					opts.chatUrl,
 				);
 
 				result = await this._agent.stream({
@@ -326,6 +322,7 @@ class AgentManager {
 		mentions?: Mention[],
 		provider?: Provider,
 		timezone?: string,
+		chatUrl?: string,
 	): Promise<ModelMessage[]> {
 		const uiMessagesWithStories = await this._syncStoryToolOutputs(uiMessages);
 		const uiMessagesWithStoryMode = this._addStoryMode(uiMessagesWithStories, mentions);
@@ -339,9 +336,14 @@ class AgentManager {
 		const connections = getConnections();
 		const skills = skillService.getSkills();
 		const basePrompt = renderToMarkdown(SystemPrompt({ memories, userRules, connections, skills, timezone }));
-		const systemPrompt = provider
-			? renderToMarkdown(MessagingProviderSystemPrompt({ basePrompt, provider }))
+		const renderedPrompt = provider
+			? renderToMarkdown(MessagingProviderSystemPrompt({ basePrompt, provider, chatUrl }))
 			: basePrompt;
+		const systemPrompt = this.chat.forkMetadata
+			? renderToMarkdown(
+					ChatForkContextPrompt({ basePrompt: renderedPrompt, forkMetadata: this.chat.forkMetadata }),
+				)
+			: renderedPrompt;
 
 		const systemMessage: Omit<UIMessage, 'id'> = {
 			role: 'system',

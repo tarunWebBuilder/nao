@@ -1,25 +1,22 @@
 import type { AmazonBedrockLanguageModelOptions } from '@ai-sdk/amazon-bedrock';
 import type { AnthropicProviderOptions } from '@ai-sdk/anthropic';
+import type { OpenAIResponsesProviderOptions as AzureOpenAIResponsesProviderOptions } from '@ai-sdk/azure';
 import type { GoogleGenerativeAIProviderOptions } from '@ai-sdk/google';
 import type { MistralLanguageModelOptions } from '@ai-sdk/mistral';
 import type { OpenAIResponsesProviderOptions } from '@ai-sdk/openai';
+import { LLM_PROVIDERS, type LlmProvider } from '@nao/shared/types';
 import type { LanguageModelV3, OpenRouterProviderOptions } from '@openrouter/ai-sdk-provider';
 import type { OllamaChatProviderOptions } from 'ai-sdk-ollama';
 import { z } from 'zod/v4';
 
 import { TokenCost } from './chat';
 
-export const llmProviderSchema = z.enum([
-	'openai',
-	'anthropic',
-	'google',
-	'mistral',
-	'openrouter',
-	'ollama',
-	'bedrock',
-	'vertex',
-]);
-export type LlmProvider = z.infer<typeof llmProviderSchema>;
+export const llmProviderSchema = z.enum(LLM_PROVIDERS);
+
+export const llmSelectedModelSchema = z.object({
+	provider: llmProviderSchema,
+	modelId: z.string(),
+});
 
 export type ProviderSettings = { apiKey: string; baseURL?: string; credentials?: Record<string, string> };
 
@@ -47,6 +44,7 @@ export type ProviderConfigMap = {
 	ollama: Flatten<OllamaChatProviderOptions>;
 	bedrock: AmazonBedrockLanguageModelOptions;
 	vertex: GoogleGenerativeAIProviderOptions;
+	azure: AzureOpenAIResponsesProviderOptions;
 };
 
 /** Model definition with provider-specific config type */
@@ -100,12 +98,6 @@ type ProviderConfig<P extends LlmProvider> = ProviderMeta<P> & {
 /** Full providers type - each key gets its own config type */
 export type LlmProvidersType = {
 	[P in LlmProvider]: ProviderConfig<P>;
-};
-
-/** A provider + model selection */
-export type ModelSelection = {
-	provider: LlmProvider;
-	modelId: string;
 };
 
 export const LLM_INFERENCE_TYPES = ['memory_extraction', 'compaction', 'title_generation'] as const;

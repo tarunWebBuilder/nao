@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from '@tanstack/react-router';
 import { useMutation } from '@tanstack/react-query';
-import { useMemo, useEffect, useCallback } from 'react';
+import { useMemo, useEffect, useCallback, useRef } from 'react';
 import { Chat as Agent, useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { useMemoObject } from './useMemoObject';
@@ -11,7 +11,7 @@ import type { FileUIPart, InferUIMessageChunk } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
 import type { UIMessage } from '@nao/backend/chat';
 import type { MentionOption } from 'prompt-mentions';
-import type ChatSelectedModel from '@/types/ai';
+import type { ImageUploadData, LlmSelectedModel } from '@nao/shared/types';
 import { messageQueueStore } from '@/stores/chat-message-queue';
 import { chatActivityStore } from '@/stores/chat-activity';
 import { useChatQuery, useSetChat } from '@/queries/use-chat-query';
@@ -28,6 +28,7 @@ import { useSetChatList } from '@/queries/use-chat-list-query';
 import { createLocalStorage } from '@/lib/local-storage';
 
 export interface AgentHelpers {
+	chatId: string | undefined;
 	messages: UIMessage[];
 	setMessages: UseChatHelpers<UIMessage>['setMessages'];
 	queueOrSendMessage: (args: SendMessageArgs) => Promise<void>;
@@ -39,14 +40,9 @@ export interface AgentHelpers {
 	stopAgent: () => Promise<void>;
 	error: Error | undefined;
 	clearError: UseChatHelpers<UIMessage>['clearError'];
-	selectedModel: ChatSelectedModel | null;
-	setSelectedModel: React.Dispatch<React.SetStateAction<ChatSelectedModel | null>>;
+	selectedModel: LlmSelectedModel | null;
+	setSelectedModel: React.Dispatch<React.SetStateAction<LlmSelectedModel | null>>;
 	setMentions: (mentions: MentionOption[]) => void;
-}
-
-export interface ImageUploadData {
-	mediaType: string;
-	data: string;
 }
 
 export interface SendMessageArgs {
@@ -54,22 +50,22 @@ export interface SendMessageArgs {
 	images?: ImageUploadData[];
 }
 
-const selectedModelStorage = createLocalStorage<ChatSelectedModel>('nao-selected-model');
+export const selectedModelStorage = createLocalStorage<LlmSelectedModel>('nao-selected-model');
 
-const selectedModelRef: { current: ChatSelectedModel | null } = { current: null };
-const mentionsRef: { current: MentionOption[] } = { current: [] };
-const chatIdRef: { current: string | undefined } = { current: undefined };
-
-export const useAgent = (): AgentHelpers => {
+export const useAgent = ({ disableNavigation = false }: { disableNavigation?: boolean } = {}): AgentHelpers => {
 	const navigate = useNavigate();
 	const chatId = useChatId();
-	chatIdRef.current = chatId;
 	const chat = useChatQuery({ chatId });
 
 	const [selectedModel, setSelectedModel] = useLocalStorage(selectedModelStorage);
-	selectedModelRef.current = selectedModel;
 	const setChat = useSetChat();
 	const setChatList = useSetChatList();
+
+	const chatIdRef = useRef(chatId);
+	chatIdRef.current = chatId;
+	const selectedModelRef = useRef<LlmSelectedModel | null>(null);
+	selectedModelRef.current = selectedModel;
+	const mentionsRef = useRef<MentionOption[]>([]);
 
 	const setMentions = useCallback((mentions: MentionOption[]) => {
 		mentionsRef.current = mentions;
@@ -78,9 +74,11 @@ export const useAgent = (): AgentHelpers => {
 	const agentInstance = useMemo(() => {
 		let agentId = chatId ?? NEW_CHAT_ID;
 
-		const existingAgent = agentService.getAgent(agentId);
-		if (existingAgent) {
-			return existingAgent;
+		if (!disableNavigation) {
+			const existingAgent = agentService.getAgent(agentId);
+			if (existingAgent) {
+				return existingAgent;
+			}
 		}
 
 		const handleAgentDataPart = (dataPart: InferUIMessageChunk<UIMessage>, agent: Agent<UIMessage>) => {
@@ -91,7 +89,9 @@ export const useAgent = (): AgentHelpers => {
 				agentId = newChat.id;
 				setChat({ chatId: newChat.id }, { ...newChat, messages: [] });
 				setChatList((old) => ({ chats: [newChat, ...(old?.chats || [])] }));
-				navigate({ to: '/$chatId', params: { chatId: newChat.id }, state: { fromMessageSend: true } });
+				if (!disableNavigation) {
+					navigate({ to: '/$chatId', params: { chatId: newChat.id }, state: { fromMessageSend: true } });
+				}
 				return;
 			}
 
@@ -161,8 +161,12 @@ export const useAgent = (): AgentHelpers => {
 			},
 		});
 
+		if (disableNavigation) {
+			return newAgent;
+		}
+
 		return agentService.registerAgent(agentId, newAgent);
-	}, [chatId, navigate, setChat, setChatList]);
+	}, [chatId, disableNavigation, navigate, setChat, setChatList]);
 
 	const { status, error, clearError, sendMessage, setMessages, messages } = useChat({ chat: agentInstance });
 
@@ -256,6 +260,7 @@ export const useAgent = (): AgentHelpers => {
 	);
 
 	return useMemoObject({
+		chatId,
 		messages,
 		setMessages,
 		queueOrSendMessage,
@@ -275,23 +280,43 @@ export const useAgent = (): AgentHelpers => {
 
 /** Sync the messages between the useChat hook and the query client. */
 export const useSyncMessages = ({ agent }: { agent: AgentHelpers }) => {
-	const { chatId } = useParams({ strict: false });
+	const chatId = useChatId();
 	const chat = useChatQuery({ chatId });
 	const setChat = useSetChat();
 
-	// Sync the agent's messages with the fetched ones
 	useEffect(() => {
 		if (chat.data?.messages && !agent.isRunning) {
 			agent.setMessages(chat.data.messages);
 		}
-	}, [chat.data?.messages, agent.isRunning, agent.setMessages]); // eslint-disable-line
+	}, [chat.data?.messages]); // eslint-disable-line react-hooks/exhaustive-deps
 
-	// Sync the fetched messages with the agent's
+	const agentMessagesRef = useRef(agent.messages);
+	agentMessagesRef.current = agent.messages;
+	const chatDataRef = useRef(chat.data);
+	chatDataRef.current = chat.data;
+
 	useEffect(() => {
-		if (agent.isRunning) {
-			setChat({ chatId }, (prev) => (!prev ? prev : { ...prev, messages: agent.messages }));
+		if (!agent.isRunning) {
+			return;
 		}
+		const base = chatDataRef.current;
+		setChat({ chatId }, (prev) => {
+			const src = prev ?? base;
+			return src ? { ...src, messages: agent.messages } : prev;
+		});
 	}, [setChat, agent.messages, chatId, agent.isRunning]);
+
+	const wasRunningRef = useRef(false);
+	useEffect(() => {
+		if (wasRunningRef.current && !agent.isRunning) {
+			const base = chatDataRef.current;
+			setChat({ chatId }, (prev) => {
+				const src = prev ?? base;
+				return src ? { ...src, messages: agentMessagesRef.current } : prev;
+			});
+		}
+		wasRunningRef.current = agent.isRunning;
+	}, [agent.isRunning, setChat, chatId]);
 };
 
 function imagesToFileUIParts(images?: ImageUploadData[]): FileUIPart[] {

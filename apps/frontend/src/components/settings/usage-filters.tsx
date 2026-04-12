@@ -1,5 +1,5 @@
 import type { Granularity } from '@nao/backend/usage';
-import type { LlmProvider } from '@nao/backend/llm';
+import type { LlmProvider } from '@nao/shared/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export type ChartView = 'messages' | 'tokens' | 'cost';
@@ -25,6 +25,7 @@ const providerLabels: Record<LlmProvider, string> = {
 	ollama: 'Ollama',
 	bedrock: 'AWS Bedrock',
 	vertex: 'Google Vertex',
+	azure: 'Azure OpenAI',
 };
 
 export const dateFormats: Record<Granularity, string> = {

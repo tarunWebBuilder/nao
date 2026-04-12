@@ -59,6 +59,9 @@ class PostgresDatabaseContext(DatabaseContext):
     def _cast_float(self, expr: str) -> str:
         return f"CAST({expr} AS DOUBLE PRECISION)"
 
+    def _cast_complex_to_string(self, col_sql: str) -> str:
+        return f"{col_sql}::TEXT"
+
 
 class PostgresConfig(DatabaseConfig):
     """PostgreSQL-specific configuration."""
@@ -134,6 +137,9 @@ class PostgresConfig(DatabaseConfig):
 
     def create_context(self, conn: BaseBackend, schema: str, table_name: str) -> PostgresDatabaseContext:
         return PostgresDatabaseContext(conn, schema, table_name)
+
+    def get_query_history_sql(self, days: int) -> str | None:
+        return "SELECT query AS query_text FROM pg_stat_statements WHERE calls > 0 LIMIT 10000"
 
     def check_connection(self) -> tuple[bool, str]:
         """Test connectivity to PostgreSQL."""

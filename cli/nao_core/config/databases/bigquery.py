@@ -278,6 +278,12 @@ class BigQueryDatabaseContext(DatabaseContext):
             return f"`{cols[0]}` >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)"
         return ""
 
+    def _array_unnest_join(self, table_sql: str, col_sql: str, alias: str) -> str:
+        return f"{table_sql}, UNNEST({col_sql}) AS {alias}"
+
+    def _cast_complex_to_string(self, col_sql: str) -> str:
+        return f"TO_JSON_STRING({col_sql})"
+
 
 def _time_based_partition_filter(col: str, col_type: str, partition_id: str) -> str:
     """Build a partition filter for time-based columns, handling all BigQuery granularities."""
@@ -515,6 +521,19 @@ class BigQueryConfig(DatabaseConfig):
         if schema not in self._schema_metadata:
             self._schema_metadata[schema] = _fetch_schema_partition_metadata(conn, self.project_id, schema)
         return self._schema_metadata[schema].get(table_name)
+
+    def get_query_history_sql(self, days: int) -> str | None:
+        region = f"region-{self.location}" if self.location else "region-us"
+        return (
+            f"SELECT query "
+            f"FROM `{self.project_id}`.`{region}`.INFORMATION_SCHEMA.JOBS "
+            f"WHERE creation_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {days} DAY) "
+            f"AND state = 'DONE' "
+            f"AND error_result IS NULL "
+            f"AND statement_type IN ('SELECT') "
+            f"ORDER BY creation_time DESC "
+            f"LIMIT 10000"
+        )
 
     def check_connection(self) -> tuple[bool, str]:
         """Test connectivity to BigQuery."""

@@ -34,10 +34,11 @@ export const DisplayChartToolCall = ({
 	const messages = agent?.messages ?? EMPTY_MESSAGES;
 	const { chatId } = useParams({ strict: false });
 	const queryClient = useQueryClient();
-	const { open: openSidePanel, currentStoryId, isVisible } = useSidePanel();
+	const { open: openSidePanel, currentStorySlug, isVisible } = useSidePanel();
 	const config = state !== 'input-streaming' ? input : undefined;
 	const [dataRange, setDataRange] = useState<DateRange>('all');
 	const storyIds = useMemo(() => findStoryIds(messages), [messages]);
+	const normalSize = useMemo(() => (document.querySelector('[data-selection-container]') ? true : false), []);
 
 	const addToStoryMutation = useMutation(
 		trpc.story.createVersion.mutationOptions({
@@ -45,7 +46,7 @@ export const DisplayChartToolCall = ({
 				queryClient.invalidateQueries({
 					queryKey: trpc.story.listVersions.queryKey({
 						chatId: variables.chatId,
-						storyId: variables.storyId,
+						storySlug: variables.storySlug,
 					}),
 				});
 				queryClient.invalidateQueries({ queryKey: trpc.story.listAll.queryKey() });
@@ -143,12 +144,14 @@ export const DisplayChartToolCall = ({
 	}
 
 	const handleAddToStory = async () => {
-		const targetId = isVisible && currentStoryId ? currentStoryId : storyIds[storyIds.length - 1];
+		const targetId = isVisible && currentStorySlug ? currentStorySlug : storyIds[storyIds.length - 1];
 		if (!targetId || !config || !chatId) {
 			return;
 		}
 
-		const data = await queryClient.fetchQuery(trpc.story.listVersions.queryOptions({ chatId, storyId: targetId }));
+		const data = await queryClient.fetchQuery(
+			trpc.story.listVersions.queryOptions({ chatId, storySlug: targetId }),
+		);
 		const latest = data.versions.at(-1);
 		if (!latest) {
 			return;
@@ -160,20 +163,20 @@ export const DisplayChartToolCall = ({
 
 		addToStoryMutation.mutate({
 			chatId,
-			storyId: targetId,
+			storySlug: targetId,
 			title: data.title,
 			code: newCode,
 			action: 'update',
 		});
 
 		if (!isVisible) {
-			openSidePanel(<StoryViewer chatId={chatId} storyId={targetId} />, targetId);
+			openSidePanel(<StoryViewer chatId={chatId} storySlug={targetId} />, targetId);
 		}
 	};
 
 	return (
 		<div
-			className={`flex flex-col items-center my-4 gap-2 ${config.chart_type !== 'kpi_card' ? 'aspect-3/2' : ''}`}
+			className={`flex flex-col items-center my-4 gap-2 ${config.chart_type !== 'kpi_card' && !normalSize ? 'aspect-3/2' : ''}`}
 		>
 			<div className='flex w-full items-center justify-between'>
 				{config.chart_type != 'kpi_card' ? (

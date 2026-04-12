@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { ShareStoryDialog } from '../share-dialog.story';
 import { StoryEditor } from './story-editor';
 import { LiveStorySettingsDialog } from './live-story-settings-dialog';
@@ -18,19 +19,44 @@ import { useStoryViewerVersions } from './hooks/use-story-viewer-versions';
 import { useStoryViewerViewMode } from './hooks/use-story-viewer-view-mode';
 import type { Editor as TiptapEditor } from '@tiptap/react';
 import { useSidePanel } from '@/contexts/side-panel';
+import { ReadonlyAgentMessagesProvider, useOptionalAgentContext } from '@/contexts/agent.provider';
+import { Spinner } from '@/components/ui/spinner';
+import { chatActivityStore } from '@/stores/chat-activity';
+import { trpc } from '@/main';
 
 interface StoryViewerProps {
 	chatId: string;
-	storyId: string;
+	storySlug: string;
+	isReadonlyMode?: boolean;
 }
 
-export function StoryViewer({ chatId, storyId }: StoryViewerProps) {
+export function StoryViewer({ chatId, storySlug, isReadonlyMode: readonlyProp }: StoryViewerProps) {
 	const tiptapEditorRef = useRef<TiptapEditor | null>(null);
 	const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-	const { close: closeSidePanel, isReadonlyMode } = useSidePanel();
+	const { close: closeSidePanel, isReadonlyMode: contextReadonlyMode, shareId } = useSidePanel();
+	const isReadonlyMode = readonlyProp ?? contextReadonlyMode;
 	const { viewMode, setViewMode } = useStoryViewerViewMode();
-	const { allStories, draftStory, isAgentRunning } = useStoryViewerAgentState(storyId);
-	const resolvedStoryId = draftStory?.id ?? storyId;
+
+	const outerAgent = useOptionalAgentContext();
+	const outerAgentHasCorrectChat = outerAgent?.chatId === chatId;
+	const chatQuery = useQuery({
+		...trpc.chat.get.queryOptions({ chatId }),
+		staleTime: Infinity,
+		enabled: !outerAgentHasCorrectChat,
+	});
+	const chatMessages = outerAgentHasCorrectChat ? undefined : (chatQuery.data?.messages ?? null);
+
+	const isChatAgentRunning = useSyncExternalStore(
+		useCallback((cb) => chatActivityStore.subscribe(chatId, cb), [chatId]),
+		useCallback(() => chatActivityStore.getActivity(chatId).running, [chatId]),
+	);
+
+	const { allStories, draftStory, isAgentRunning } = useStoryViewerAgentState(
+		storySlug,
+		chatMessages,
+		isChatAgentRunning,
+	);
+	const resolvedStorySlug = draftStory?.id ?? storySlug;
 	const {
 		versions,
 		storyTitle: storedTitle,
@@ -40,18 +66,19 @@ export function StoryViewer({ chatId, storyId }: StoryViewerProps) {
 		isViewingLatest,
 		goToPreviousVersion,
 		goToNextVersion,
-	} = useStoryViewerVersions({ chatId, storyId: resolvedStoryId, isAgentRunning });
+	} = useStoryViewerVersions({ chatId, storySlug: resolvedStorySlug, isAgentRunning, isReadonlyMode });
 	const { storyTitle, storyCode, queryData, cachedAt } = useStoryViewerContent({
-		storyId,
-		resolvedStoryId,
+		storySlug,
+		resolvedStorySlug,
 		chatId,
 		draftStory,
 		currentVersion,
 		storedTitle,
+		isReadonlyMode,
 	});
 	const { handleSave, handleRestore } = useStoryViewerVersionActions({
 		chatId,
-		storyId: resolvedStoryId,
+		storySlug: resolvedStorySlug,
 		storyTitle: storedTitle,
 		currentVersionCode: currentVersion?.code,
 		isViewingLatest,
@@ -60,7 +87,7 @@ export function StoryViewer({ chatId, storyId }: StoryViewerProps) {
 	});
 	const { isShareDialogOpen, setIsShareDialogOpen, isShared } = useStoryViewerSharing({
 		chatId,
-		storyId: resolvedStoryId,
+		storySlug: resolvedStorySlug,
 	});
 	const {
 		isLive,
@@ -71,16 +98,18 @@ export function StoryViewer({ chatId, storyId }: StoryViewerProps) {
 		isRefreshing,
 		handleSaveSettings,
 		handleRefreshData,
-	} = useStoryViewerLiveSettings({ chatId, storyId: resolvedStoryId });
+	} = useStoryViewerLiveSettings({ chatId, storySlug: resolvedStorySlug });
 	const [isLiveSettingsOpen, setIsLiveSettingsOpen] = useState(false);
-	const { handleEnlarge } = useStoryViewerEnlarge({ chatId, storyId: resolvedStoryId });
+	const { handleEnlarge } = useStoryViewerEnlarge({ chatId, storySlug: resolvedStorySlug });
 
 	const handleOpenShare = useCallback(() => setIsShareDialogOpen(true), [setIsShareDialogOpen]);
 	const handleOpenLiveSettings = useCallback(() => setIsLiveSettingsOpen(true), []);
 
 	const renderStoryViewer = useCallback(
-		(nextStoryId: string) => <StoryViewer chatId={chatId} storyId={nextStoryId} />,
-		[chatId],
+		(nextStorySlug: string) => (
+			<StoryViewer chatId={chatId} storySlug={nextStorySlug} isReadonlyMode={readonlyProp} />
+		),
+		[chatId, readonlyProp],
 	);
 	const { switchStory } = useStoryViewerSwitchStory({ renderStoryViewer });
 
@@ -92,6 +121,13 @@ export function StoryViewer({ chatId, storyId }: StoryViewerProps) {
 	});
 
 	if (!storyCode) {
+		if (chatQuery.isLoading) {
+			return (
+				<div className='flex h-full items-center justify-center'>
+					<Spinner />
+				</div>
+			);
+		}
 		return (
 			<div className='flex h-full items-center justify-center text-muted-foreground text-sm'>
 				{isAgentRunning ? 'Waiting for story stream...' : 'No Story content available.'}
@@ -99,17 +135,20 @@ export function StoryViewer({ chatId, storyId }: StoryViewerProps) {
 		);
 	}
 
-	return (
+	const content = (
 		<div className='flex h-full flex-col'>
 			<StoryHeader
 				title={storyTitle}
-				storyId={resolvedStoryId}
+				chatId={chatId}
+				storySlug={resolvedStorySlug}
+				shareId={shareId}
 				allStories={allStories}
 				onSwitchStory={switchStory}
 				viewMode={viewMode}
 				onViewModeChange={setViewMode}
 				currentVersion={currentVersionNumber}
 				totalVersions={versions.length}
+				versionNumber={currentVersion?.version}
 				onPreviousVersion={goToPreviousVersion}
 				onNextVersion={goToNextVersion}
 				isViewingLatest={isViewingLatest}
@@ -127,7 +166,7 @@ export function StoryViewer({ chatId, storyId }: StoryViewerProps) {
 				onClose={closeSidePanel}
 			/>
 
-			{Boolean(archivedAt) && <ArchivedBanner chatId={chatId} storyId={resolvedStoryId} />}
+			{Boolean(archivedAt) && <ArchivedBanner chatId={chatId} storySlug={resolvedStorySlug} />}
 
 			<div ref={scrollContainerRef} className='flex-1 min-h-0 overflow-auto'>
 				{viewMode === 'preview' ? (
@@ -149,7 +188,7 @@ export function StoryViewer({ chatId, storyId }: StoryViewerProps) {
 				open={isShareDialogOpen}
 				onOpenChange={setIsShareDialogOpen}
 				chatId={chatId}
-				storyId={resolvedStoryId}
+				storySlug={resolvedStorySlug}
 			/>
 
 			<LiveStorySettingsDialog
@@ -164,4 +203,10 @@ export function StoryViewer({ chatId, storyId }: StoryViewerProps) {
 			/>
 		</div>
 	);
+
+	if (!chatMessages) {
+		return content;
+	}
+
+	return <ReadonlyAgentMessagesProvider messages={chatMessages}>{content}</ReadonlyAgentMessagesProvider>;
 }

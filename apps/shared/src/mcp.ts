@@ -4,6 +4,7 @@ export interface McpServerConfig {
 	type?: 'http';
 	transport?: 'streamable-http' | 'sse' | 'http' | 'stdio';
 	url?: URL;
+	headers?: Record<string, string>;
 
 	// For stdio transport
 	command?: string;
@@ -21,6 +22,8 @@ export interface McpServerState {
 	error?: string;
 }
 
+export type McpState = Record<string, McpServerState>;
+
 export const mcpJsonSchema = z.object({
 	mcpServers: z.record(
 		z.string(),
@@ -32,6 +35,7 @@ export const mcpJsonSchema = z.object({
 				.url()
 				.optional()
 				.transform((val) => (val ? new URL(val) : undefined)),
+			headers: z.record(z.string(), z.string()).optional(),
 			command: z.string().optional(),
 			args: z.array(z.string()).optional(),
 			env: z.record(z.string(), z.string()).optional(),

@@ -1,4 +1,6 @@
-import type { LlmProvider, ProviderAuth, ProviderMetaMap } from '../types/llm';
+import type { LlmProvider } from '@nao/shared/types';
+
+import type { ProviderAuth, ProviderMetaMap } from '../types/llm';
 
 /** Provider metadata: models, auth config, env vars. No SDK imports — safe for frontend. */
 export const PROVIDER_META: ProviderMetaMap = {
@@ -220,12 +222,43 @@ export const PROVIDER_META: ProviderMetaMap = {
 			{ id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Vertex)', contextWindow: 200_000 },
 		],
 	},
+	azure: {
+		auth: {
+			apiKey: 'required',
+			hint: 'Provide either a Resource Name or a Base URL — not both',
+			extraFields: [
+				{
+					name: 'resourceName',
+					label: 'Resource Name',
+					envVar: 'AZURE_RESOURCE_NAME',
+					placeholder: 'my-resource (builds https://{name}.openai.azure.com)',
+				},
+				{
+					name: 'apiVersion',
+					label: 'API Version',
+					envVar: 'AZURE_API_VERSION',
+					placeholder: 'v1',
+				},
+				{
+					name: 'useDeploymentBasedUrls',
+					label: 'Use Deployment-Based URLs',
+					envVar: 'AZURE_USE_DEPLOYMENT_BASED_URLS',
+					placeholder: 'false',
+				},
+			],
+		},
+		envVar: 'AZURE_API_KEY',
+		baseUrlEnvVar: 'AZURE_OPENAI_BASE_URL',
+		extractorModelId: '',
+		summaryModelId: '',
+		models: [],
+	},
 };
 
 export function getDefaultModelId(provider: LlmProvider): string {
 	const models = PROVIDER_META[provider].models;
 	const defaultModel = models.find((m) => m.default);
-	return defaultModel?.id ?? models[0].id;
+	return defaultModel?.id ?? models[0]?.id ?? '';
 }
 
 export function getProviderAuth(provider: LlmProvider): ProviderAuth {

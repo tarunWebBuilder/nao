@@ -1,10 +1,25 @@
+import type { LlmProvider } from '@nao/shared/types';
 import { and, asc, desc, eq, gte, isNull, like, sql } from 'drizzle-orm';
 
-import s, { DBChat, DBChatMessage, DBMessagePart, MessageFeedback, NewChat } from '../db/abstractSchema';
+import s, {
+	DBChat,
+	DBChatMessage,
+	DBMessagePart,
+	MessageFeedback,
+	NewChat,
+	NewMessagePart,
+} from '../db/abstractSchema';
 import { db } from '../db/db';
 import dbConfig, { Dialect } from '../db/dbConfig';
-import { ListChatResponse, StopReason, TokenUsage, UIChat, UIMessage, UIMessagePart } from '../types/chat';
-import { LlmProvider } from '../types/llm';
+import {
+	ForkMetadata,
+	ListChatResponse,
+	StopReason,
+	TokenUsage,
+	UIChat,
+	UIMessage,
+	UIMessagePart,
+} from '../types/chat';
 import { convertDBPartToUIPart, mapUIPartsToDBParts } from '../utils/chat-message-part-mappings';
 import { getErrorMessage } from '../utils/utils';
 
@@ -67,6 +82,7 @@ export const loadChat = async (
 			createdAt: chat.createdAt.getTime(),
 			updatedAt: chat.updatedAt.getTime(),
 			messages,
+			forkMetadata: chat.forkMetadata ?? undefined,
 		},
 		chat.userId,
 	];
@@ -75,7 +91,6 @@ export const loadChat = async (
 /** Aggregate the message parts into a list of UI messages. */
 const aggregateChatMessagParts = (
 	result: {
-		chat?: DBChat;
 		chat_message: DBChatMessage;
 		message_part: DBMessagePart;
 		message_feedback?: MessageFeedback | null;
@@ -97,6 +112,7 @@ const aggregateChatMessagParts = (
 					parts: [uiPart],
 					feedback: row.message_feedback ?? undefined,
 					source: row.chat_message.source ?? undefined,
+					isForked: row.chat_message.isForked ?? undefined,
 				};
 			}
 			return acc;
@@ -186,6 +202,49 @@ export const createChat = async (
 	});
 };
 
+export const createForkedChat = async (newChat: NewChat, messages: Array<Omit<UIMessage, 'id'>>): Promise<DBChat> => {
+	return db.transaction(async (t) => {
+		const [savedChat] = await t.insert(s.chat).values(newChat).returning().execute();
+
+		const baseTime = Date.now();
+		for (let i = 0; i < messages.length; i++) {
+			const message = messages[i];
+			const messageId = crypto.randomUUID();
+			await t
+				.insert(s.chatMessage)
+				.values({
+					id: messageId,
+					chatId: savedChat.id,
+					role: message.role,
+					isForked: true,
+					createdAt: new Date(baseTime + i),
+				})
+				.execute();
+
+			const dbParts = remapToolCallIds(mapUIPartsToDBParts(message.parts, messageId));
+			if (dbParts.length > 0) {
+				await t.insert(s.messagePart).values(dbParts).execute();
+			}
+		}
+
+		return savedChat;
+	});
+};
+
+/** Assigns fresh tool call IDs so forked parts don't collide with the source chat's unique constraint. */
+const remapToolCallIds = (parts: NewMessagePart[]): NewMessagePart[] => {
+	const idMap = new Map<string, string>();
+	return parts.map((part) => {
+		if (!part.toolCallId) {
+			return part;
+		}
+		if (!idMap.has(part.toolCallId)) {
+			idMap.set(part.toolCallId, crypto.randomUUID());
+		}
+		return { ...part, toolCallId: idMap.get(part.toolCallId) };
+	});
+};
+
 export const upsertMessage = async (
 	message: Omit<UIMessage, 'id'> & {
 		id?: string;
@@ -210,6 +269,7 @@ export const upsertMessage = async (
 				llmProvider: message.llmProvider,
 				llmModelId: message.llmModelId,
 				source: message.source,
+				isForked: message.isForked,
 				...message.tokenUsage,
 			})
 			.onConflictDoNothing({ target: s.chatMessage.id })
@@ -330,6 +390,16 @@ export const getChatByWhatsappThread = async (threadId: string): Promise<{ id: s
 	return result.at(0) || null;
 };
 
+export const clearWhatsappThread = async (threadId: string): Promise<boolean> => {
+	const result = await db
+		.update(s.chat)
+		.set({ whatsappThreadId: null })
+		.where(eq(s.chat.whatsappThreadId, threadId))
+		.returning({ id: s.chat.id })
+		.execute();
+	return result.length > 0;
+};
+
 export type SearchChatResult = {
 	id: string;
 	title: string;
@@ -413,6 +483,49 @@ const caseInsensitiveLike = (column: Parameters<typeof like>[0], pattern: string
 	}
 	// SQLite LIKE is case-insensitive by default for ASCII
 	return like(column, pattern);
+};
+
+export const getSelectionForksByShareId = async (
+	userId: string,
+	shareId: string,
+	forkType: 'chat_selection' | 'story_selection',
+): Promise<{ chatId: string; selectionStart: number; selectionEnd: number; selectionText: string }[]> => {
+	const typeFilter =
+		dbConfig.dialect === Dialect.Postgres
+			? sql`${s.chat.forkMetadata}->>'type' = ${forkType}`
+			: sql`json_extract(${s.chat.forkMetadata}, '$.type') = ${forkType}`;
+
+	const idFilter =
+		dbConfig.dialect === Dialect.Postgres
+			? sql`${s.chat.forkMetadata}->>'id' = ${shareId}`
+			: sql`json_extract(${s.chat.forkMetadata}, '$.id') = ${shareId}`;
+
+	const results = await db
+		.select({ id: s.chat.id, forkMetadata: s.chat.forkMetadata })
+		.from(s.chat)
+		.where(and(eq(s.chat.userId, userId), isNull(s.chat.deletedAt), typeFilter, idFilter))
+		.execute();
+
+	return results
+		.filter((r) => r.forkMetadata?.selectionStart !== undefined)
+		.map((r) => {
+			const meta = r.forkMetadata!;
+			return {
+				chatId: r.id,
+				selectionStart: meta.selectionStart!,
+				selectionEnd: meta.selectionEnd!,
+				selectionText: meta.selectionText ?? '',
+			};
+		});
+};
+
+export const getForkMetadata = async (chatId: string): Promise<ForkMetadata | null> => {
+	const [result] = await db
+		.select({ forkMetadata: s.chat.forkMetadata })
+		.from(s.chat)
+		.where(eq(s.chat.id, chatId))
+		.execute();
+	return result?.forkMetadata ?? null;
 };
 
 export const getChatProjectId = async (chatId: string): Promise<string | undefined> => {
