@@ -48,6 +48,46 @@ export const authConfigRoutes = {
 		}),
 	},
 	smtp: {
-		isSetup: publicProcedure.query(() => emailService.isEnabled()),
+		isSetup: publicProcedure.query(async () => {
+			const config = await orgQueries.getSmtpConfig();
+			return !!(config.host && config.mailFrom && config.password);
+		}),
+		getSettings: adminProtectedProcedure.query(async () => {
+			const config = await orgQueries.getSmtpConfig();
+			return { ...config };
+		}),
+		updateSettings: adminProtectedProcedure
+			.input(
+				z.object({
+					host: z.string(),
+					port: z.string(),
+					mailFrom: z.string(),
+					password: z.string(),
+					ssl: z.boolean(),
+				}),
+			)
+			.mutation(async ({ input }) => {
+				const org = await orgQueries.getFirstOrganization();
+				if (!org) {
+					throw new TRPCError({ code: 'NOT_FOUND', message: 'No organization found' });
+				}
+
+				const existingConfig = await orgQueries.getSmtpConfig();
+				const host = input.host || existingConfig.host;
+				const port = input.port || existingConfig.port;
+				const mailFrom = input.mailFrom || existingConfig.mailFrom;
+				const password = input.password || existingConfig.password;
+
+				await orgQueries.updateSmtpSettings(org.id, {
+					smtpHost: host || null,
+					smtpPort: port || null,
+					smtpMailFrom: mailFrom || null,
+					smtpPassword: password || null,
+					smtpSsl: host && mailFrom && password ? input.ssl : null,
+				});
+
+				await emailService.reloadSmtpConfig();
+				return { success: true };
+			}),
 	},
 };

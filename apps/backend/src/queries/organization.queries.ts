@@ -7,6 +7,20 @@ import { OrgRole } from '../types/organization';
 import * as projectQueries from './project.queries';
 import * as userQueries from './user.queries';
 
+interface UpdateGoogleSettingsInput {
+	googleClientId: string | null;
+	googleClientSecret: string | null;
+	googleAuthDomains: string | null;
+}
+
+interface UpdateSmtpSettingsInput {
+	smtpHost: string | null;
+	smtpPort: string | null;
+	smtpMailFrom: string | null;
+	smtpPassword: string | null;
+	smtpSsl: boolean | null;
+}
+
 export const getOrganizationById = async (id: string): Promise<DBOrganization | null> => {
 	const [org] = await db.select().from(s.organization).where(eq(s.organization.id, id)).execute();
 	return org ?? null;
@@ -62,11 +76,7 @@ export const getUserRoleInOrg = async (orgId: string, userId: string): Promise<O
 
 export const updateGoogleSettings = async (
 	orgId: string,
-	settings: {
-		googleClientId: string | null;
-		googleClientSecret: string | null;
-		googleAuthDomains: string | null;
-	},
+	settings: UpdateGoogleSettingsInput,
 ): Promise<DBOrganization> => {
 	const [updated] = await db
 		.update(s.organization)
@@ -84,6 +94,31 @@ export const getGoogleConfig = async () => {
 		clientSecret: org?.googleClientSecret || env.GOOGLE_CLIENT_SECRET || '',
 		authDomains: org?.googleAuthDomains || env.GOOGLE_AUTH_DOMAINS || '',
 		usingDbOverride: !!(org?.googleClientId && org?.googleClientSecret),
+	};
+};
+
+export const updateSmtpSettings = async (orgId: string, settings: UpdateSmtpSettingsInput): Promise<DBOrganization> => {
+	const [updated] = await db
+		.update(s.organization)
+		.set(settings)
+		.where(eq(s.organization.id, orgId))
+		.returning()
+		.execute();
+	return updated;
+};
+
+export const getSmtpConfig = async () => {
+	const org = await getFirstOrganization();
+	const envSmtpSsl = env.SMTP_SSL ? env.SMTP_SSL === 'true' : undefined;
+	const hasDbOverride = !!(org?.smtpHost && org?.smtpMailFrom && org?.smtpPassword);
+
+	return {
+		host: org?.smtpHost || env.SMTP_HOST || '',
+		port: org?.smtpPort || env.SMTP_PORT || '587',
+		mailFrom: org?.smtpMailFrom || env.SMTP_MAIL_FROM || '',
+		password: org?.smtpPassword || env.SMTP_PASSWORD || '',
+		ssl: org?.smtpSsl ?? envSmtpSsl ?? false,
+		usingDbOverride: hasDbOverride,
 	};
 };
 
